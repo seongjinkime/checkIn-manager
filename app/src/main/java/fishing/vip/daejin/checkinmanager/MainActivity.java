@@ -1,5 +1,7 @@
 package fishing.vip.daejin.checkinmanager;
 
+import android.app.ProgressDialog;
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.support.v7.app.AppCompatActivity;
@@ -9,6 +11,7 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import com.google.firebase.database.DataSnapshot;
@@ -18,69 +21,64 @@ import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.database.ValueEventListener;
 import com.squareup.picasso.Picasso;
 
+import java.sql.Time;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.Map;
 
+import fishing.vip.daejin.database.FBManager;
+import fishing.vip.daejin.database.SQLHelper;
+import fishing.vip.daejin.model.Crews;
+import fishing.vip.daejin.model.User;
+import fishing.vip.daejin.observers.CrewsObserver;
 import jp.wasabeef.picasso.transformations.BlurTransformation;
 
 public class MainActivity extends AppCompatActivity {
 
-    EditText tmp;
+    public EditText tmp;
+    private Crews crews;
+    private String phone;
+    ProgressDialog progressDialog;
+    private Toaster toaster;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        //loadWallpaper();
+        toaster = new Toaster(this);
+        phone = "";
+        progressDialog = new ProgressDialog(this);
+        progressDialog.setMessage("로딩 중");
+        progressDialog.setProgressStyle(ProgressDialog.STYLE_SPINNER);
+        loadWallpaper();
         tmp = (EditText)findViewById(R.id.tmpEdit);
-        final FirebaseDatabase database = FirebaseDatabase.getInstance();
-
-        String refPath = "users";
-        DatabaseReference ref = database.getReference(refPath);
-        HashMap<String, String> test = new HashMap<>();
-        /*
-        for(int i = 0 ; i < 9000 ; i++){
-            //Log.e("TEST", String.format("010-0000-%04d", i));
-            test.put(String.format("010-0000-%04d", i), "TESTER");
-        }
-        ref.setValue(test);
-        */
-
-
-        database.getReference("users").orderByKey().addListenerForSingleValueEvent(new ValueEventListener() {
-            @Override
-            public void onDataChange(DataSnapshot dataSnapshot) {
-
-                SharedPreferences pref = getSharedPreferences("tFile", MODE_PRIVATE);
-                SharedPreferences.Editor editor = pref.edit();
-
-                for(DataSnapshot snapshot : dataSnapshot.getChildren()){
-
-                    //HashMap<String, String> tmp = (HashMap<String, String>)snapshot.getValue();
-                    //String phone = tmp.keySet().iterator().next();
-                    //String name = tmp.get(phone);
-                    //Log.e("TEST",snapshot.getKey() + " : " + snapshot.getValue());
-                    editor.putString(snapshot.getKey(), snapshot.getValue().toString());
-                }
-                editor.commit();
-                Log.e("TEST", "Done");
-                SharedPreferences pref2 = getSharedPreferences("tFile", MODE_PRIVATE);
-                Log.e("TEST", pref2.getString("010-0000-1234", ""));
-                //Log.e("TEST", String.valueOf(dataSnapshot.exists()));
-            }
-
-            @Override
-            public void onCancelled(DatabaseError databaseError) {
-
-            }
-        });
-
-        //database.getReference("users")
-        //database.getReference(refPath).setValue("Test1");
-        //loadDocument(currentDate());
+        initDatabase();
 
     }
+    public void initDatabase(){
+        progressDialog.show();
+        FBManager fbManager = FBManager.getInstance(this);
+        fbManager.startWatchingCrews(new CrewsObserver(this));
+        fbManager.syncUsers();
+    }
+
+    private void initUi(){
+
+    }
+
+    public void crewsChanged(Crews crews){
+        this.crews = crews;
+        Log.e("TEST", "crewChanged");
+        Log.e("TEST", String.valueOf(crews.getTotal()));
+    }
+
+    public void initComplete(){
+        progressDialog.hide();
+    }
+
 
     private void loadWallpaper(){
         ImageView imageView = (ImageView)findViewById(R.id.wallpaper);
@@ -90,88 +88,67 @@ public class MainActivity extends AppCompatActivity {
                 .into(imageView);
     }
 
-    private void addNumber(String num){
-        String newStr = tmp.getText().toString() + num;
-        tmp.setText(newStr);
+    private void addNum(String num){
+        phone += num;
+        tmp.setText(phone);
+        if(phone.length()==4){
+            ArrayList<User> users = SQLHelper.getInstance(this).getUser(phone);
+            if(users.size() == 1){
+                ((TextView)findViewById(R.id.tv_desc)).setText(users.get(0).getName() + " 님");
+            }else if(users.size()>1){
+                ((TextView)findViewById(R.id.tv_desc)).setText(users.get(0).getName() + " 님 외 " + String.valueOf(users.size()-1) + " 명");
+            }
+        }else{
+            ((TextView)findViewById(R.id.tv_desc)).setText("전화번호 끝 4자리를 입력해주세요");
+        }
+    }
+
+    private void delNum(){
+        if(phone.length()>0){
+            phone = phone.substring(0, phone.length()-1);
+            tmp.setText(phone);
+        }
+        ((TextView)findViewById(R.id.tv_desc)).setText("전화번호 끝 4자리를 입력해주세요");
+    }
+
+    private void checkIn(){
+        if(phone.length() != 4){
+            toaster.showToast("전화번호 끝 4자리를 입력해주세요", Toaster.NORMAL);
+            return;
+        }
+
+        ArrayList<User> users = SQLHelper.getInstance(this).getUser(phone);
+
+        if(users.size() < 1){
+            Log.e("Check in", "no user");
+        }else if(users.size() == 1){
+            String phone = users.get(0).getPhone();
+            if(crews.phoneExists(phone)){
+                toaster.showToast("이미 체크인 되었습니다", Toaster.NORMAL);
+                return;
+            }
+            crews.addPhone(phone);
+            FBManager.getInstance(this).updateCrews(crews);
+        }else{
+            Log.e("Check in", "One More User");
+        }
+
     }
 
     public void onClick(View v){
-        Log.e("TEST", String.valueOf(v.getId()));
-        switch (v.getId()){
+        if(v.getTag() != null && v.getTag().toString().equals("keyPad")){
+            addNum(((Button)v).getText().toString());
+            return;
+        }
 
-            case R.id.button0:
-            case R.id.button1:
-            case R.id.button2:
-            case R.id.button3:
-            case R.id.button4:
-            case R.id.button5:
-            case R.id.button6:
-            case R.id.button7:
-            case R.id.button8:
-            case R.id.button9:
-                Button btn = (Button)v;
-                addNumber(btn.getText().toString());
+        switch (v.getId()){
+            case R.id.btn_del:
+                delNum();
                 break;
             case R.id.check_in:
-                Toast.makeText(getApplicationContext(), "CHECK IN", Toast.LENGTH_SHORT).show();
+                checkIn();
                 break;
         }
     }
-    /*
-
-    private String currentDate(){
-        SimpleDateFormat df = new SimpleDateFormat("yyy-mm-dd");
-        return df.format(Calendar.getInstance().getTime());
-
-    }
-
-    private void loadDocument(String date){
-        if(!tmpIsDocumentExist(date)){
-            tmpCreateNewDocument(date);
-        }
-        tmpLoadDocument(date);
-    }
-    //Put the document manager
-
-    private boolean tmpIsDocumentExist(String date){
-        return false;
-    }
-
-    private void tmpCreateNewDocument(String date){
-        showToast(date + "의 새로운 명부를 생성 합니다");
-    }
-
-    private void tmpLoadDocument(String date){
-        showToast(date + "의 명부를 로드 합니다");
-    }
-
-    private void showToast(String msg){
-        Log.e("TMP", msg);
-        Toast.makeText(getApplicationContext(), msg, Toast.LENGTH_SHORT).show();
-    }
-
-    public void onClick(View v){
-        switch (v.getId()){
-            case R.id.button_checkin:
-                startCheckIn();
-                break;
-            case R.id.button_print:
-                startPrint();
-                break;
-        }
-
-    }
-
-    private void startCheckIn(){
-        showToast("체크인을 시작 합니다");
-        Intent intent = new Intent(MainActivity.this, checkInActivity.class);
-        getApplicationContext().startActivity(intent);
-    }
-
-    private void startPrint(){
-        showToast("프린트를 시작합니다");
-    }
-    */
-
 
 }
